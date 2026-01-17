@@ -3,10 +3,60 @@ import pandas as pd
 import requests
 import math
 
-# --- 網頁配置 ---
-st.set_page_config(page_title="PokeEvolve Pro - 專業進化圖鑑", layout="wide", page_icon="🧪")
+# --- 1. 網頁配置 ---
+st.set_page_config(page_title="PokeEvolve Pro - 互動圖鑑", layout="wide", page_icon="🐾")
 
-# --- 1. 顏色與常數定義 ---
+# --- 2. 注入自定義 CSS (包含懸浮效果) ---
+def local_css():
+    st.markdown("""
+        <style>
+        /* 整體背景與字體 */
+        .main { background-color: #f4f4f9; }
+        
+        /* Pokedex 紅色標題裝飾 */
+        .pokedex-header {
+            background-color: #E63946;
+            padding: 20px;
+            border-radius: 15px;
+            text-align: center;
+            color: white;
+            box-shadow: 0 4px 15px rgba(230, 57, 70, 0.3);
+            margin-bottom: 25px;
+        }
+
+        /* 核心卡片懸浮效果 */
+        [data-testid="stVerticalBlockBorderWrapper"] {
+            transition: transform 0.3s ease, box-shadow 0.3s ease !important;
+            border-radius: 15px !important;
+        }
+        
+        [data-testid="stVerticalBlockBorderWrapper"]:hover {
+            transform: translateY(-8px) scale(1.01) !important;
+            box-shadow: 0 12px 24px rgba(0,0,0,0.15) !important;
+            border-color: #E63946 !important;
+        }
+
+        /* 屬性標籤樣式 */
+        .type-badge {
+            color: white;
+            padding: 3px 10px;
+            border-radius: 20px;
+            font-size: 11px;
+            font-weight: bold;
+            text-transform: uppercase;
+            margin-right: 5px;
+            display: inline-block;
+        }
+
+        /* 自定義捲軸 */
+        ::-webkit-scrollbar { width: 8px; }
+        ::-webkit-scrollbar-thumb { background: #E63946; border-radius: 10px; }
+        </style>
+    """, unsafe_allow_html=True)
+
+local_css()
+
+# --- 3. 常數與輔助函式 ---
 TYPE_COLORS = {
     "fire": "#FF421C", "water": "#6390F0", "grass": "#7AC74C", "electric": "#F7D02C",
     "ice": "#96D9D6", "fighting": "#C22E28", "poison": "#A33EA1", "ground": "#E2BF65",
@@ -15,141 +65,93 @@ TYPE_COLORS = {
     "fairy": "#D685AD", "normal": "#A8A77A"
 }
 
-# --- 2. 核心功能函式 ---
-
 @st.cache_data
-def load_csv():
-    """載入進化資料庫"""
+def load_data():
     try:
-        return pd.read_csv("evolution.csv")
+        df = pd.read_csv("evolution.csv")
+        return df
     except:
-        st.error("請確認 GitHub 儲存庫中是否有 evolution.csv 檔案")
+        st.error("找不到 evolution.csv 檔案")
         return pd.DataFrame()
 
 @st.cache_data
-def get_poke_api_data(en_name):
-    """獲取 PokeAPI 詳細數據、種族值與進化鏈"""
+def get_poke_data(en_name):
     try:
-        # 獲取基本資訊
         res = requests.get(f"https://pokeapi.co/api/v2/pokemon/{en_name.lower()}")
-        if res.status_code != 200: return None
-        data = res.json()
-        
-        # 獲取進化鏈資訊 (需先獲取 species)
-        species_res = requests.get(data["species"]["url"])
-        species_data = species_res.json()
-        evol_chain_url = species_data["evolution_chain"]["url"]
-        
-        return {
-            "id": data["id"],
-            "img": data["sprites"]["other"]["official-artwork"]["front_default"],
-            "types": [t["type"]["name"] for t in data["types"]],
-            "stats": {s["stat"]["name"]: s["base_stat"] for s in data["stats"]},
-            "height": data["height"] / 10,
-            "weight": data["weight"] / 10,
-            "evol_chain_url": evol_chain_url
-        }
-    except:
-        return None
+        if res.status_code == 200:
+            d = res.json()
+            return {
+                "id": d["id"],
+                "img": d["sprites"]["other"]["official-artwork"]["front_default"],
+                "types": [t["type"]["name"] for t in d["types"]],
+                "stats": {s["stat"]["name"]: s["base_stat"] for s in d["stats"]}
+            }
+    except: return None
 
-def calculate_estimated_cp(stats):
-    """
-    使用使用者提供的公式估算強度值 (CP Estimator)
-    公式: CP = (Atk * sqrt(Def) * sqrt(Sta)) / 10
-    注意: PokeAPI 的 hp 對應 Sta
-    """
+def calc_cp_index(stats):
     atk = stats.get("attack", 0)
     dfn = stats.get("defense", 0)
     sta = stats.get("hp", 0)
-    
-    cp_value = (atk * math.sqrt(dfn) * math.sqrt(sta)) / 10
-    return int(cp_value)
+    return int((atk * math.sqrt(dfn) * math.sqrt(sta)) / 10)
 
-# --- 3. UI 介面實作 ---
+# --- 4. 介面內容 ---
+st.markdown('<div class="pokedex-header"><h1>🐾 POKÉDEX PRO</h1><p>互動式進化百科與戰力分析系統</p></div>', unsafe_allow_html=True)
 
-st.title("🧪 PokeEvolve Pro 專業進化計算圖鑑")
-st.markdown("---")
+df = load_data()
 
-df = load_csv()
+# 側邊欄設定
+st.sidebar.header("⚙️ 控制面板")
+search = st.sidebar.text_input("搜尋寶可夢 (中/英)", "")
+current_candy = st.sidebar.number_input("當前糖果數量", min_value=0, value=0)
 
-# 側邊欄：搜尋與過濾
-st.sidebar.header("🔍 搜尋篩選")
-cat_list = ["全部"] + list(df["cat"].unique())
-selected_cat = st.sidebar.selectbox("進化分類", cat_list)
-search_name = st.sidebar.text_input("輸入名稱 (中/英)", "")
+# 資料過濾
+filtered_df = df[df["zh"].str.contains(search) | df["en"].str.contains(search.lower())] if search else df
 
-# 側邊欄：糖果計算機全域設定
-st.sidebar.divider()
-st.sidebar.header("🍬 糖果計算機")
-current_candies = st.sidebar.number_input("目前擁有的糖果總數", min_value=0, value=0)
-
-# 過濾邏輯
-filtered_df = df if selected_cat == "全部" else df[df["cat"] == selected_cat]
-if search_name:
-    filtered_df = filtered_df[filtered_df["zh"].str.contains(search_name) | filtered_df["en"].str.contains(search_name.lower())]
-
-# --- 4. 顯示結果 ---
-
+# 顯示卡片網格
 if not filtered_df.empty:
-    for _, row in filtered_df.iterrows():
-        with st.container(border=True):
-            col_img, col_info, col_calc = st.columns([1.2, 2, 1.8])
-            
-            api_data = get_poke_api_data(row['en'])
-            
-            with col_img:
-                if api_data:
-                    st.image(api_data["img"], use_container_width=True)
-                    # 屬性標籤
-                    type_html = ""
-                    for t in api_data["types"]:
-                        color = TYPE_COLORS.get(t, "#777")
-                        type_html += f'<span style="background-color:{color}; color:white; padding:2px 8px; border-radius:10px; margin-right:5px; font-size:12px;">{t.upper()}</span>'
-                    st.markdown(type_html, unsafe_allow_html=True)
-                else:
-                    st.warning("無法載入圖片")
+    cols = st.columns(3)
+    for idx, row in filtered_df.reset_index().iterrows():
+        with cols[idx % 3]:
+            # 建立具備懸浮效果的容器
+            with st.container(border=True):
+                api_data = get_poke_data(row['en'])
+                
+                # 佈局：上方圖片與標題
+                c1, c2 = st.columns([1, 1.2])
+                with c1:
+                    if api_data:
+                        st.image(api_data["img"], use_container_width=True)
+                    else:
+                        st.write("❓")
+                
+                with c2:
+                    st.subheader(row['zh'])
+                    if api_data:
+                        # 顯示彩色標籤
+                        badge_html = ""
+                        for t in api_data["types"]:
+                            color = TYPE_COLORS.get(t, "#777")
+                            badge_html += f'<span class="type-badge" style="background-color:{color};">{t}</span>'
+                        st.markdown(badge_html, unsafe_allow_html=True)
+                        
+                        cp = calc_cp_index(api_data["stats"])
+                        st.metric("戰力基數", f"⚡ {cp}")
 
-            with col_info:
-                st.subheader(f"{row['zh']}")
-                st.write(f"🧬 **進化條件:** {row['cond']}")
-                
-                if api_data:
-                    # CP 估算顯示
-                    cp = calculate_estimated_cp(api_data["stats"])
-                    st.metric("估算強度基數 (CP Index)", f"⚡ {cp}")
-                    
-                    # 種族值簡單條形圖
-                    st.write("**📊 種族值分佈**")
-                    s = api_data["stats"]
-                    chart_data = pd.DataFrame({
-                        "屬性": ["HP", "攻擊", "防禦", "速度"],
-                        "值": [s["hp"], s["attack"], s["defense"], s["speed"]]
-                    })
-                    st.bar_chart(chart_data.set_index("屬性"), horizontal=True, height=150)
-
-            with col_calc:
-                st.subheader("🧮 進化計算機")
-                target_candy = row['candy']
-                diff = target_candy - current_candies
-                
-                if diff <= 0:
-                    st.success(f"✅ 糖果充足！可以進化。\n(剩餘: {abs(diff)} 顆)")
-                else:
-                    st.error(f"❌ 糖果不足：還差 {diff} 顆")
-                    # 進階換算
-                    st.write(f"🏃 需作為夥伴行走: **{diff * 5} km** (以 5km/顆計)")
-                    st.write(f"🍎 需捕捉次數: **{math.ceil(diff / 3)}** 隻 (不含鳳梨果)")
-                
+                # 下方詳細資訊
                 st.divider()
-                # 簡單進化鏈提示 (顯示當前 ID 的關聯)
+                st.write(f"🍬 **進化需求:** {row['candy']} 顆")
+                st.info(f"💡 **條件:** {row['cond']}")
+                
+                # 糖果計算機邏輯
+                diff = row['candy'] - current_candy
+                if diff > 0:
+                    st.caption(f"🚩 還差 {diff} 顆糖果 (約需捕捉 {math.ceil(diff/3)} 隻)")
+                else:
+                    st.success("✅ 糖果已達標！")
+                
+                # 加入叫聲彩蛋
                 if api_data:
-                    st.caption(f"🔗 PokeAPI 索引 ID: #{api_data['id']}")
-                    st.caption("🔍 進化鏈路徑已鎖定，建議查看遊戲內進化按鈕。")
-
+                    cry_url = f"https://raw.githubusercontent.com/PokeAPI/cries/master/cries/pokemon/latest/{api_data['id']}.ogg"
+                    st.audio(cry_url, format="audio/ogg")
 else:
-    st.info("請調整篩選條件或確認 CSV 資料。")
-
-# --- 5. 下載功能 ---
-st.sidebar.divider()
-csv_data = df.to_csv(index=False).encode('utf-8-sig')
-st.sidebar.download_button("📥 匯出資料庫 (CSV)", csv_data, "evolution_data.csv", "text/csv")
+    st.info("查無此寶可夢，請嘗試其他關鍵字。")
