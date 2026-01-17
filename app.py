@@ -2,91 +2,76 @@ import streamlit as st
 import pandas as pd
 import requests
 
-# --- 網頁配置 ---
-st.set_page_config(page_title="PokeEvolve - 寶可夢進化百科", page_icon="⚡", layout="wide")
+# --- 設定 ---
+st.set_page_config(page_title="寶可夢進化大全", layout="wide")
 
-# --- PokeAPI 輔助函式 ---
-def get_pokemon_info(name_en):
-    """從 PokeAPI 抓取圖片與基本資訊"""
-    url = f"https://pokeapi.co/api/v2/pokemon/{name_en.lower()}"
-    response = requests.get(url)
-    if response.status_code == 200:
-        data = response.json()
-        return {
-            "id": data["id"],
-            "image": data["sprites"]["other"]["official-artwork"]["front_default"],
-            "types": [t["type"]["name"] for t in data["types"]]
-        }
-    return None
-
-# --- 進化資料庫 (自定義特殊條件) ---
-# 這裡整理了 Pokemon GO 中常見的特殊進化
-def get_evolution_data():
-    return [
-        {"中文名": "鯉魚王", "英文名": "magikarp", "分類": "高消耗進化", "糖果": 400, "條件": "無"},
-        {"中文名": "大蔥鴨(伽勒爾)", "英文名": "farfetchd-galar", "分類": "戰鬥任務", "糖果": 50, "條件": "作為夥伴投出 10 次 Excellent"},
-        {"中文名": "伊布(仙子伊布)", "英文名": "sylveon", "分類": "夥伴進化", "糖果": 25, "條件": "夥伴心心達到 70 顆"},
-        {"中文名": "勇基拉", "英文名": "kadabra", "分類": "交換進化", "糖果": 100, "條件": "交換後可 0 糖果進化"},
-        {"中文名": "小嘴蝸", "英文名": "shelmet", "分類": "交換進化", "糖果": 50, "條件": "需與蓋蓋蟲交換"},
-        {"中文名": "頑皮熊貓", "英文名": "pancham", "分類": "特殊任務", "糖果": 50, "條件": "夥伴狀態捕捉 32 隻惡屬性"},
-        {"中文名": "好啦魷", "英文名": "inkay", "分類": "體感操作", "糖果": 50, "條件": "將手機倒過來進行進化"},
+# --- 資料庫 (完整版預覽) ---
+def load_full_data():
+    data = [
+        # 高耗能
+        {"cat": "高耗能", "zh": "鯉魚王", "en": "magikarp", "candy": 400, "cond": "無"},
+        {"cat": "高耗能", "zh": "美錄坦", "en": "meltan", "candy": 400, "cond": "需連接 Switch 或 Home 開啟神秘盒子"},
+        {"cat": "高耗能", "zh": "燃燒蟲", "en": "larvesta", "candy": 400, "cond": "目前最難進化的非神獸"},
+        {"cat": "高耗能", "zh": "童偶熊", "en": "stufful", "candy": 400, "cond": "無"},
+        # 夥伴任務
+        {"cat": "夥伴任務", "zh": "大蔥鴨(伽勒爾)", "en": "farfetchd-galar", "candy": 50, "cond": "夥伴狀態投 10 次 Excellent"},
+        {"cat": "夥伴任務", "zh": "頑皮熊貓", "en": "pancham", "candy": 50, "cond": "夥伴狀態捕捉 32 隻惡屬性"},
+        {"cat": "夥伴任務", "zh": "千針魚(洗翠)", "en": "qwilfish-hisui", "candy": 50, "cond": "夥伴狀態贏得 10 場團體戰"},
+        {"cat": "夥伴任務", "zh": "布土撥", "en": "pawmo", "candy": 25, "cond": "夥伴狀態行走 25 公里"},
+        {"cat": "夥伴任務", "zh": "火爆猴", "en": "primeape", "candy": 100, "cond": "夥伴狀態擊敗 30 隻幽靈或超能力系"},
+        # 交換進化
+        {"cat": "交換進化", "zh": "勇基拉", "en": "kadabra", "candy": 100, "cond": "交換後進化可免糖果"},
+        {"cat": "交換進化", "zh": "地幔岩", "en": "boldore", "candy": 100, "cond": "交換後進化可免糖果"},
+        {"cat": "交換進化", "zh": "小嘴蝸", "en": "shelmet", "candy": 50, "cond": "需與蓋蓋蟲交換"},
+        # 環境與特殊
+        {"cat": "環境/時間", "zh": "好啦魷", "en": "inkay", "candy": 50, "cond": "手機倒置 (螢幕朝下)"},
+        {"cat": "環境/時間", "zh": "岩狗狗", "en": "rockruff", "candy": 50, "cond": "黃昏型態需在 17:00-18:00 進化"},
+        {"cat": "環境/時間", "zh": "黏美兒", "en": "sliggoo", "candy": 100, "cond": "雨天或雨露誘餌模組"},
+        {"cat": "環境/時間", "zh": "三蜜蜂", "en": "combee", "candy": 50, "cond": "僅限雌性可進化為蜂后"},
     ]
+    return pd.DataFrame(data)
 
-# --- 介面開始 ---
-st.title("🐾 寶可夢進化特殊條件索引 (PokeAPI 連動)")
-st.write("本系統串接 PokeAPI 自動獲取圖片，並整理 Pokemon GO 特殊進化需求。")
+df = load_full_data()
 
-# 讀取資料
-raw_data = get_evolution_data()
-df = pd.DataFrame(raw_data)
+# --- PokeAPI 獲取圖片 ---
+@st.cache_data
+def get_poke_img(en_name):
+    try:
+        res = requests.get(f"https://pokeapi.co/api/v2/pokemon/{en_name.lower()}")
+        if res.status_code == 200:
+            return res.json()["sprites"]["other"]["official-artwork"]["front_default"]
+    except:
+        return None
 
-# --- 側邊欄過濾 ---
-st.sidebar.header("搜尋篩選")
-all_categories = ["全部"] + list(df["分類"].unique())
-selected_cat = st.sidebar.selectbox("選擇進化分類", all_categories)
+# --- UI 介面 ---
+st.title("📖 寶可夢特殊進化條件完整百科")
 
-# 過濾邏輯
-if selected_cat != "全部":
-    display_df = df[df["分類"] == selected_cat]
-else:
-    display_df = df
+# 側邊欄篩選
+st.sidebar.header("過濾工具")
+category = st.sidebar.multiselect("選擇進化類型", options=df["cat"].unique(), default=df["cat"].unique())
+search_name = st.sidebar.text_input("搜尋名稱 (中/英文)", "")
 
-# --- 分類標籤 (Tabs) ---
-tab_list, tab_search = st.tabs(["📜 特殊進化清單", "🔍 單一寶可夢查詢"])
+# 邏輯過濾
+mask = (df["cat"].isin(category)) & (df["zh"].str.contains(search_name) | df["en"].str.contains(search_name.lower()))
+filtered_df = df[mask]
 
-with tab_list:
-    # 使用網格佈局 (Columns) 顯示卡片
+# 顯示網格
+if not filtered_df.empty:
     cols = st.columns(3)
-    for index, row in display_df.iterrows():
-        with cols[index % 3]:
-            # 獲取 API 資料
-            api_info = get_pokemon_info(row["英文名"])
-            
+    for idx, row in filtered_df.reset_index().iterrows():
+        with cols[idx % 3]:
             with st.container(border=True):
-                if api_info:
-                    st.image(api_info["image"], use_container_width=True)
-                st.subheader(row["中文名"])
-                st.markdown(f"**分類：** `{row['分類']}`")
-                st.markdown(f"**🍬 糖果需求：** {row['糖果']}")
-                st.info(f"**進化條件：**\n{row['條件']}")
+                img_url = get_poke_img(row['en'])
+                if img_url:
+                    st.image(img_url, use_container_width=True)
+                st.subheader(row['zh'])
+                st.caption(f"英文名: {row['en'].capitalize()}")
+                st.write(f"🍬 **所需糖果:** {row['candy']}")
+                st.warning(f"💡 **條件:** {row['cond']}")
+else:
+    st.info("沒有找到相符的寶可夢。")
 
-with tab_search:
-    st.subheader("任意寶可夢資訊查詢 (PokeAPI 直連)")
-    search_input = st.text_input("輸入寶可夢英文名稱 (如: Pikachu, Eevee, Charizard)", "Eevee")
-    
-    if search_input:
-        info = get_pokemon_info(search_input)
-        if info:
-            col_a, col_b = st.columns([1, 2])
-            with col_a:
-                st.image(info["image"])
-            with col_b:
-                st.write(f"### 編號: #{info['id']}")
-                st.write(f"### 屬性: {', '.join(info['types'])}")
-                st.success("此資料直接從 PokeAPI 抓取，若為特殊進化請參考左側清單。")
-        else:
-            st.error("找不到該寶可夢，請確認英文名稱是否正確。")
-
-# --- 底部宣告 ---
-st.divider()
-st.caption("Data provided by PokeAPI.co | 寶可夢特殊進化數據由社群整理")
+# --- 下載區 ---
+st.sidebar.divider()
+csv = df.to_csv(index=False).encode('utf-8-sig')
+st.sidebar.download_button("📥 下載完整對照表 CSV", csv, "pokemon_evolution.csv", "text/csv")
