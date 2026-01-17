@@ -5,35 +5,21 @@ import requests
 # --- 設定 ---
 st.set_page_config(page_title="寶可夢進化大全", layout="wide")
 
-# --- 資料庫 (完整版預覽) ---
-def load_full_data():
-    data = [
-        # 高耗能
-        {"cat": "高耗能", "zh": "鯉魚王", "en": "magikarp", "candy": 400, "cond": "無"},
-        {"cat": "高耗能", "zh": "美錄坦", "en": "meltan", "candy": 400, "cond": "需連接 Switch 或 Home 開啟神秘盒子"},
-        {"cat": "高耗能", "zh": "燃燒蟲", "en": "larvesta", "candy": 400, "cond": "目前最難進化的非神獸"},
-        {"cat": "高耗能", "zh": "童偶熊", "en": "stufful", "candy": 400, "cond": "無"},
-        # 夥伴任務
-        {"cat": "夥伴任務", "zh": "大蔥鴨(伽勒爾)", "en": "farfetchd-galar", "candy": 50, "cond": "夥伴狀態投 10 次 Excellent"},
-        {"cat": "夥伴任務", "zh": "頑皮熊貓", "en": "pancham", "candy": 50, "cond": "夥伴狀態捕捉 32 隻惡屬性"},
-        {"cat": "夥伴任務", "zh": "千針魚(洗翠)", "en": "qwilfish-hisui", "candy": 50, "cond": "夥伴狀態贏得 10 場團體戰"},
-        {"cat": "夥伴任務", "zh": "布土撥", "en": "pawmo", "candy": 25, "cond": "夥伴狀態行走 25 公里"},
-        {"cat": "夥伴任務", "zh": "火爆猴", "en": "primeape", "candy": 100, "cond": "夥伴狀態擊敗 30 隻幽靈或超能力系"},
-        # 交換進化
-        {"cat": "交換進化", "zh": "勇基拉", "en": "kadabra", "candy": 100, "cond": "交換後進化可免糖果"},
-        {"cat": "交換進化", "zh": "地幔岩", "en": "boldore", "candy": 100, "cond": "交換後進化可免糖果"},
-        {"cat": "交換進化", "zh": "小嘴蝸", "en": "shelmet", "candy": 50, "cond": "需與蓋蓋蟲交換"},
-        # 環境與特殊
-        {"cat": "環境/時間", "zh": "好啦魷", "en": "inkay", "candy": 50, "cond": "手機倒置 (螢幕朝下)"},
-        {"cat": "環境/時間", "zh": "岩狗狗", "en": "rockruff", "candy": 50, "cond": "黃昏型態需在 17:00-18:00 進化"},
-        {"cat": "環境/時間", "zh": "黏美兒", "en": "sliggoo", "candy": 100, "cond": "雨天或雨露誘餌模組"},
-        {"cat": "環境/時間", "zh": "三蜜蜂", "en": "combee", "candy": 50, "cond": "僅限雌性可進化為蜂后"},
-    ]
-    return pd.DataFrame(data)
+# --- 讀取資料 (從 CSV 讀取) ---
+@st.cache_data
+def load_data():
+    try:
+        # 讀取同資料夾下的 evolution.csv
+        df = pd.read_csv("evolution.csv")
+        return df
+    except FileNotFoundError:
+        # 如果找不到檔案，回傳一個空表格避免程式崩潰
+        st.error("找不到 evolution.csv 檔案，請確認檔案已上傳至 GitHub。")
+        return pd.DataFrame(columns=["cat", "zh", "en", "candy", "cond"])
 
-df = load_full_data()
+df = load_data()
 
-# --- PokeAPI 獲取圖片 ---
+# --- PokeAPI 獲取圖片 (加入快取) ---
 @st.cache_data
 def get_poke_img(en_name):
     try:
@@ -44,18 +30,32 @@ def get_poke_img(en_name):
         return None
 
 # --- UI 介面 ---
-st.title("📖 寶可夢特殊進化條件完整百科")
+st.title("📖 寶可夢特殊進化條件百科")
 
-# 側邊欄篩選
-st.sidebar.header("過濾工具")
-category = st.sidebar.multiselect("選擇進化類型", options=df["cat"].unique(), default=df["cat"].unique())
+# --- 側邊欄過濾工具 (改回下拉式選單) ---
+st.sidebar.header("搜尋與篩選")
+
+# 建立分類選單，加入「全部」選項
+categories = ["全部"] + list(df["cat"].unique())
+selected_cat = st.sidebar.selectbox("選擇進化類型", options=categories)
+
 search_name = st.sidebar.text_input("搜尋名稱 (中/英文)", "")
 
-# 邏輯過濾
-mask = (df["cat"].isin(category)) & (df["zh"].str.contains(search_name) | df["en"].str.contains(search_name.lower()))
-filtered_df = df[mask]
+# --- 過濾邏輯 ---
+# 根據選單過濾
+if selected_cat == "全部":
+    filtered_df = df
+else:
+    filtered_df = df[df["cat"] == selected_cat]
 
-# 顯示網格
+# 根據搜尋框過濾
+if search_name:
+    filtered_df = filtered_df[
+        filtered_df["zh"].str.contains(search_name) | 
+        filtered_df["en"].str.contains(search_name.lower())
+    ]
+
+# --- 顯示結果 ---
 if not filtered_df.empty:
     cols = st.columns(3)
     for idx, row in filtered_df.reset_index().iterrows():
@@ -69,9 +69,9 @@ if not filtered_df.empty:
                 st.write(f"🍬 **所需糖果:** {row['candy']}")
                 st.warning(f"💡 **條件:** {row['cond']}")
 else:
-    st.info("沒有找到相符的寶可夢。")
+    st.info("沒有找到符合條件的寶可夢。")
 
 # --- 下載區 ---
 st.sidebar.divider()
-csv = df.to_csv(index=False).encode('utf-8-sig')
-st.sidebar.download_button("📥 下載完整對照表 CSV", csv, "pokemon_evolution.csv", "text/csv")
+csv_data = df.to_csv(index=False).encode('utf-8-sig')
+st.sidebar.download_button("📥 下載完整 CSV 清單", csv_data, "pokemon_evolution.csv", "text/csv")
